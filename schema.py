@@ -26,28 +26,50 @@ class Author:
 
 @strawberry.type
 class Book:
+    """Тип книги с информацией об авторе."""
+    id: int
     title: str
     author: Author
 
+
+@strawberry.enum
+class SortDirection:
+    """Направление сортировки."""
+    ASC = "ASC"
+    DESC = "DESC"
+
+@strawberry.enum
+class SortField:
+    """Поля для сортировки."""
+    TITLE = "title"
+    AUTHOR_NAME = "author_name"
 
 @strawberry.type
 class Query:
     """
     Класс для определения запросов GraphQL.
+    Поддерживает выбор полей, сортировку и пагинацию.
     """
 
     @strawberry.field
     async def books(
             self,
             info: Info[Context, None],
-            # Исправлена ошибка, которая потенциально могла привести приложение к падению
+            # Параметр author_ids должен быть списком ID авторов или None для получения всех книг
             author_ids: list[int] | None = None,
+            # Поисковый запрос по названию книги
             search: str | None = None,
+            # Максимальное количество результатов
             limit: int | None = 100,
+            # Смещение для пагинации
             offset: int = 0,
+            # Параметры сортировки
+            sort_field: SortField | None = SortField.TITLE,
+            # Направление сортировки (ASC или DESC)
+            sort_direction: SortDirection | None = SortDirection.ASC,
     ) -> list[Book]:
         """
-        Получение книг с опциональной фильтрацией по автору, поиску и пагинацией.
+        Получение книг с опциональной фильтрацией по автору, поиску и пагинации.
 
         Arguments:
             author_ids: Опциональный список ID авторов для фильтрации
@@ -65,28 +87,37 @@ class Query:
             if offset < 0:
                 raise ValueError("Смещение должно быть неотрицательным")
 
-            # Гибкий и безопасный (от SQL-инъекций) запрос с поддержкой пагинации и регистроназависимым поиском
+            # Безопасный SQL-запрос с параметризацией
             query = """
                 -- основной запрос
                 SELECT b.id, b.title, a.name as author_name 
                 FROM books b
                 JOIN authors a ON b.author_id = a.id
-                -- фильтрация по автарам
-                WHERE ($1 IS NULL OR b.author_id = ANY($1))
+                -- фильтрация по авторам
+                WHERE (COALESCE($1::text, '') = '' OR b.author_id = ANY($1::bigint[]))
                 -- фильтрация по названию
-                -- используетс ILIKE для регистронезависимого поиска
-                AND ($2 IS NULL OR b.title ILIKE '%' || $2 || '%')
-                -- сортировка и пагинация
-                ORDER BY b.title ASC
+                AND (COALESCE($2::text, '') = '' OR b.title ILIKE '%' || $2 || '%')
+                -- сортировка с обработкой NULL значений
+                ORDER BY 
+                    CASE $5
+                        WHEN 'title' THEN COALESCE(b.title, '')
+                        WHEN 'author_name' THEN COALESCE(a.name, '')
+                    END $6
                 LIMIT $3 OFFSET $4
             """
 
-            # Подготовка параметров со значениями по умолчанию
+            # Подготовка параметров сортировки
+            sort_field = "title" if sort_field == SortField.TITLE else "author_name"
+            sort_direction = "ASC" if sort_direction == SortDirection.ASC else "DESC"
+            
+            # Подготовка параметров запроса
             params = [
-                author_ids if author_ids else None,
-                search.lower() if search else None,
+                author_ids if author_ids else [],
+                search.lower() if search else "",
                 limit,
-                offset
+                offset,
+                sort_field,
+                sort_direction
             ]
 
             # Выполнение запроса с таймаутом для предотвращения зависания
@@ -98,6 +129,7 @@ class Query:
             
             return [
                 Book(
+                    id=row["id"],
                     title=row["title"],
                     author=Author(name=row["author_name"]),
                 )
@@ -105,7 +137,8 @@ class Query:
             ]
 
         except Exception as e:
-            print(f"Что-то пошло не так: {e}")
+            print(f"Ошибка при выполнении запроса: {type(e).__name__}: {str(e)}")
+            # Возвращаем пустой список вместо выброса ошибки для GraphQL клиента
             return []
 
 

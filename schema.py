@@ -105,7 +105,7 @@ class Query:
             ]
 
         except Exception as e:
-            print(f"Что-то пошло не так: {str(e)}")
+            print(f"Что-то пошло не так: {e}")
             return []
 
 

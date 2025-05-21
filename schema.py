@@ -58,7 +58,6 @@ class Query:
             # Параметр author_ids должен быть списком ID авторов или None для получения всех книг
             author_ids: list[int] | None = None,
             search: str | None = None,
-            # Фиксированный лимит по умолчанию, если не задан могут быть не очевидные проблемы
             limit: int | None = 100,
             offset: int = 0,
             # Параметры сортировки

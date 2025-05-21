@@ -8,8 +8,6 @@ create table books (
     author_id bigint not null references authors(id) on delete cascade
 );
 create index books_author_id_idx on books (author_id);
-
-
 insert into authors (name) values
     ('Oscar Wilde'), ('Agatha Christie'), ('Mark Twain');
 insert into books (title, author_id) values

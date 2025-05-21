@@ -26,26 +26,44 @@ class Author:
 
 @strawberry.type
 class Book:
+    """Тип книги с информацией об авторе."""
+    id: int
     title: str
     author: Author
 
+
+@strawberry.enum
+class SortDirection:
+    """Направление сортировки."""
+    ASC = "ASC"
+    DESC = "DESC"
+
+@strawberry.enum
+class SortField:
+    """Поля для сортировки."""
+    TITLE = "title"
+    AUTHOR_NAME = "author_name"
 
 @strawberry.type
 class Query:
     """
     Класс для определения запросов GraphQL.
+    Поддерживает выбор полей, сортировку и пагинацию.
     """
 
     @strawberry.field
     async def books(
             self,
             info: Info[Context, None],
-            # Исправлена ошибка, которая потенциально могла привести приложение к падению
+            # Параметр author_ids должен быть списком ID авторов или None для получения всех книг
             author_ids: list[int] | None = None,
             search: str | None = None,
             # Фиксированный лимит по умолчанию, если не задан могут быть не очевидные проблемы
             limit: int | None = 100,
             offset: int = 0,
+            # Параметры сортировки
+            sort_field: SortField | None = SortField.TITLE,
+            sort_direction: SortDirection | None = SortDirection.ASC,
     ) -> list[Book]:
         """
         Получение книг с опциональной фильтрацией по автору, поиску и пагинации.
@@ -66,8 +84,7 @@ class Query:
             if offset < 0:
                 raise ValueError("Смещение должно быть неотрицательным")
 
-            # Гибкий и безопасны запрос с поддержкой пагинации и регистроназависимым поиском
-            # использует параметры вместо подстановки значений (безопасносость от SQL-инъекций)
+            # Гибкий и безопасный (от SQL-инъекций) запрос с поддержкой пагинации и регистроназависимым поиском
             query = """
                 -- основной запрос
                 SELECT b.id, b.title, a.name as author_name 
@@ -78,12 +95,15 @@ class Query:
                 -- фильтрация по названию
                 -- используетс ILIKE для регистронезависимого поиска
                 AND ($2 IS NULL OR b.title ILIKE '%' || $2 || '%')
-                -- сортировка и пагинация
-                ORDER BY b.title ASC
+                -- динамическая сортировка по выбранному полю и направлению
+                ORDER BY {sort_field} {sort_direction} 
                 LIMIT $3 OFFSET $4
             """
 
             # Подготовка параметров со значениями по умолчанию
+            sort_field = "b.title" if sort_field == SortField.TITLE else "a.name"
+            sort_direction = "ASC" if sort_direction == SortDirection.ASC else "DESC"
+            
             params = [
                 author_ids if author_ids else None,
                 search.lower() if search else None,
@@ -107,7 +127,8 @@ class Query:
             ]
 
         except Exception as e:
-            print(f"Что-то пошло не так: {str(e)}")
+            print(f"Ошибка при выполнении запроса: {e}")
+            # Возвращаем пустой список вместо выброса ошибки
             return []
 
 
